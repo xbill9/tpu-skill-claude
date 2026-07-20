@@ -34,6 +34,26 @@ Pick the install path that fits:
 | All projects + user-scope MCP registration | `make init ARGS='--global'` |
 | Another machine | `make skill-package`, copy `dist/tpu-management-skill.zip`, unzip into `~/.claude/skills/` |
 
+### Install from GitHub
+
+Clone and install (all projects on this machine):
+
+```bash
+git clone https://github.com/xbill9/tpu-skill-claude
+cd tpu-skill-claude
+make skill-install                                   # skill only
+./project-setup.sh --global                          # skill + user-scope tpu-devops MCP server
+```
+
+Or skip the clone and install straight from the packaged zip:
+
+```bash
+curl -L -o /tmp/tpu-management-skill.zip \
+  https://github.com/xbill9/tpu-skill-claude/raw/main/dist/tpu-management-skill.zip
+mkdir -p ~/.claude/skills && unzip -o /tmp/tpu-management-skill.zip -d ~/.claude/skills/
+~/.claude/skills/tpu-management/mcp/project-setup.sh --global   # optional: register the MCP server
+```
+
 All of these first run `make skill` (`refresh_skill.py`), which regenerates the bundled snapshot from the repo-root sources: `server.py`, `project-setup.sh`, and `requirements.txt` are copied into the skill's `mcp/` folder, and `references/tpu-builders-guide.md` is rebuilt from `tpu.md` with the embedded screenshots stripped. `SKILL.md` and `mcp/startup_script_template.sh` are hand-maintained and never overwritten.
 
 After installing (or updating), **restart Claude Code** or start a new session so it picks up the skill. Verify with `/skills` — `tpu-management` should be listed.

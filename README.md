@@ -36,7 +36,16 @@ Pick the install path that fits:
 
 ### Install from GitHub
 
-Clone and install (all projects on this machine):
+**Option A — Claude Code plugin marketplace (recommended):**
+
+```
+/plugin marketplace add xbill9/tpu-skill-claude
+/plugin install tpu-management@tpu-skill-claude
+```
+
+This installs the `tpu-management` skill **and** registers the `tpu-devops` MCP server in one step, with updates managed by Claude Code (`/plugin` → manage/update). Configure the server through environment variables (e.g. `GOOGLE_CLOUD_PROJECT`, `MODEL_NAME`, `ACCELERATOR_TYPE`) — see `SKILL.md` or the `get_help` tool for the full list.
+
+**Option B — clone and install** (all projects on this machine):
 
 ```bash
 git clone https://github.com/xbill9/tpu-skill-claude
@@ -45,7 +54,7 @@ make skill-install                                   # skill only
 ./project-setup.sh --global                          # skill + user-scope tpu-devops MCP server
 ```
 
-Or skip the clone and install straight from the packaged zip:
+**Option C — zip install, no clone** (straight from the packaged zip):
 
 ```bash
 curl -L -o /tmp/tpu-management-skill.zip \

@@ -3,8 +3,9 @@
 # Dynamically discover all subdirectories containing a Makefile
 SUBDIRS := $(patsubst %/,%,$(dir $(wildcard */Makefile)))
 
-SKILL_DIR := .claude/skills/tpu-management
-DIST_DIR  := dist
+SKILL_DIR  := .claude/skills/tpu-management
+PLUGIN_DIR := skills/tpu-management
+DIST_DIR   := dist
 
 .PHONY: all clean test lint install deploy help init skill skill-install skill-package $(SUBDIRS)
 
@@ -22,6 +23,7 @@ help:
 	@echo "  make install - Run 'make install' in all subdirectories"
 	@echo "  make deploy  - Run 'make deploy' in all subdirectories"
 	@echo "  make skill         - Refresh tpu-management skill snapshots from server.py / tpu.md"
+	@echo "                       (also syncs the plugin copy in skills/ for the marketplace)"
 	@echo "  make skill-install - Refresh + copy the skill to ~/.claude/skills (all projects)"
 	@echo "  make skill-package - Refresh + build dist/tpu-management-skill.zip"
 	@echo "  make init TARGET=/path/to/project [ARGS='--project my-gcp-id']"
@@ -39,6 +41,10 @@ init: skill
 
 skill:
 	python3 refresh_skill.py
+	rm -rf $(PLUGIN_DIR)
+	mkdir -p $(dir $(PLUGIN_DIR))
+	cp -r $(SKILL_DIR) $(PLUGIN_DIR)
+	@echo "Synced plugin copy -> $(PLUGIN_DIR)"
 
 skill-install: skill
 	mkdir -p $(HOME)/.claude/skills

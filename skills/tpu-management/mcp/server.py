@@ -288,23 +288,40 @@ async def discover_vllm_url() -> Optional[str]:
     return None
 
 
-async def get_vllm_client() -> AsyncOpenAI:
-    """Initializes and returns an AsyncOpenAI client for the vLLM service."""
+async def _get_served_model_id(url: str) -> Optional[str]:
+    """The model id vLLM actually loaded — the only id it answers to. Deploy-time
+    model_name overrides mean this can differ from the configured MODEL_NAME."""
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            res = await client.get(f"{url}/v1/models")
+        if res.status_code == 200:
+            data = res.json().get("data", [])
+            if data:
+                return data[0].get("id")
+    except Exception:
+        pass
+    return None
+
+
+async def get_vllm_client() -> tuple[AsyncOpenAI, str]:
+    """Returns an AsyncOpenAI client for the vLLM service plus the model id it is
+    actually serving (falling back to MODEL_NAME if /v1/models is unreachable)."""
     url = await discover_vllm_url()
     if not url:
-        raise Exception(f"No ACTIVE Queued Resource found in {ZONE}.")
-    return AsyncOpenAI(base_url=f"{url}/v1", api_key="not-needed")
+        raise Exception(f"No active vLLM service found (zone {ZONE}).")
+    model_id = await _get_served_model_id(url) or MODEL_NAME
+    return AsyncOpenAI(base_url=f"{url}/v1", api_key="not-needed"), model_id
 
 
 @mcp.tool(title="Verify model health", annotations=READ_ONLY)
 async def verify_model_health() -> str:
     """Runs a deep logic check with latency reporting."""
     try:
-        client = await get_vllm_client()
+        client, model_id = await get_vllm_client()
         start_time = time.monotonic()
         chat_completion = await client.chat.completions.create(
             messages=[{"role": "user", "content": "Hello, is the model working?"}],
-            model=MODEL_NAME,
+            model=model_id,
             max_tokens=10,
         )
         end_time = time.monotonic()
@@ -423,11 +440,21 @@ async def _create_queued_resource(
 ) -> str:
     """Creates a single Queued Resource with the vLLM startup script. Non-destructive:
     never touches other resources."""
+    selected_model = model_name or MODEL_NAME
+    try:
+        accel_chips = int(ACCELERATOR_TYPE.rsplit("-", 1)[-1])
+    except ValueError:
+        accel_chips = None
+    min_chips = _min_chips_for_model(selected_model)
+    if accel_chips is not None and accel_chips < min_chips:
+        return (
+            f"❌ `{selected_model}` needs ~{min_chips} chips but `{ACCELERATOR_TYPE}` has {accel_chips} — "
+            "it would OOM after a long load. Pick a larger accelerator or a smaller model."
+        )
+
     token = await get_secret()
     if not token:
         return "❌ Aborted: 'hf-token' secret missing. Save one with `save_hf_token` first."
-
-    selected_model = model_name or MODEL_NAME
     try:
         startup_script_content = _get_formatted_startup_script(selected_model, zone)
     except RuntimeError as e:
@@ -584,6 +611,20 @@ _GCE_IMAGE_FLAGS = [
 _GCE_TPU_FILTER = "machineType~'ct6e|ct5p'"
 
 
+def _min_chips_for_model(model: str) -> int:
+    """Rough single-host chip floor for full-precision checkpoints (~32GB HBM per
+    v6e chip). Prevents the expensive failure mode of a big model on a small
+    accelerator: VM boot + image pull + ~10 min of loading before an inevitable OOM.
+    Quantized variants (QAT/int4/AWQ/GPTQ/FP8) are ~4x smaller — never blocked."""
+    lowered = model.lower()
+    if any(q in lowered for q in ("qat", "int4", "q4", "awq", "gptq", "fp8")):
+        return 1
+    for marker, chips in (("31B", 4), ("26B", 4)):
+        if marker in model:
+            return chips
+    return 1  # 12B and below fit on a single chip
+
+
 @mcp.tool(title="Create flex-start TPU VM", annotations=WRITE)
 async def create_tpu_vm_instance(
     instance_name: str = "vllm-gemma4-vm",
@@ -602,6 +643,14 @@ async def create_tpu_vm_instance(
         supported = ", ".join(sorted(_GCE_MACHINE_TYPES))
         return f"❌ Unsupported accelerator '{accelerator}'. Supported: {supported}"
     machine_type, chips = _GCE_MACHINE_TYPES[accelerator]
+
+    fit_model = model_name or MODEL_NAME
+    min_chips = _min_chips_for_model(fit_model)
+    if chips < min_chips:
+        return (
+            f"❌ `{fit_model}` needs ~{min_chips} chips but `{accelerator}` has {chips} — "
+            "it would OOM after a long load. Pick a larger accelerator or a smaller model."
+        )
 
     token = await get_secret()
     if not token:
@@ -1106,11 +1155,18 @@ async def manage_vllm_docker(
         Optional[float], Field(gt=0, le=1, description="Memory utilization fraction; auto-picked from model size")
     ] = None,
 ) -> str:
-    """Manages the vLLM Docker container on the serving host ('start' creates and runs
-    it if it doesn't exist yet). Targets the queued resource's node by default, or a
-    GCE flex-start TPU VM when instance_name is given."""
+    """Manages the vLLM Docker container on the serving host. Targets the queued
+    resource's node by default, or a GCE flex-start TPU VM when instance_name is given.
+
+    'start' with any serving parameter (model_name, load_format, max_model_len,
+    gpu_memory_utilization) REPLACES the container so the new configuration takes
+    effect — this is how you switch the served model. A plain 'start' just restarts
+    the existing container (or creates one with defaults)."""
     zone = _zone(zone)
     selected_model = model_name or MODEL_NAME
+    config_given = any(
+        p is not None for p in (model_name, load_format, max_model_len, gpu_memory_utilization)
+    )
     # Auto-detect defaults based on model name
     is_large = "26B" in selected_model or "31B" in selected_model
     resolved_load_format = load_format or ("tpu_streaming_loader" if is_large else "runai_streamer")
@@ -1137,8 +1193,15 @@ async def manage_vllm_docker(
         f'--limit-mm-per-prompt \'{{"image":0,"audio":0}}\''
     )
 
+    # A plain start reuses an existing container; with explicit serving params the
+    # container must be recreated or the params would be silently ignored.
+    start_cmd = (
+        f"sudo docker rm -f vllm-gemma4 >/dev/null 2>&1; {docker_run_cmd}"
+        if config_given
+        else f"sudo docker start vllm-gemma4 || {docker_run_cmd}"
+    )
     commands = {
-        "start": f"sudo docker start vllm-gemma4 || {docker_run_cmd}",
+        "start": start_cmd,
         "stop": "sudo docker stop vllm-gemma4",
         "restart": "sudo docker restart vllm-gemma4",
         "status": "sudo docker ps -a --filter name=vllm-gemma4",
@@ -1303,12 +1366,12 @@ async def query_queued_gemma4(prompt: str, include_stats: bool = False) -> str:
     total generation time, and tokens/second."""
     logger.info(f"Querying model with prompt: '{prompt[:50]}...'")
     try:
-        client = await get_vllm_client()
+        client, model_id = await get_vllm_client()
 
         if not include_stats:
             chat_completion = await client.chat.completions.create(
                 messages=[{"role": "user", "content": prompt}],
-                model=MODEL_NAME,
+                model=model_id,
             )
             response = chat_completion.choices[0].message.content or "No response from model."
             logger.info(f"Model response: '{response[:100]}...'")
@@ -1321,7 +1384,7 @@ async def query_queued_gemma4(prompt: str, include_stats: bool = False) -> str:
 
         stream = await client.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
-            model=MODEL_NAME,
+            model=model_id,
             stream=True,
         )
 
@@ -1379,13 +1442,16 @@ async def run_vllm_benchmark(
 ) -> str:
     """Runs vLLM's internal benchmark tool in a separate container on the serving host
     (queued resource node by default, or a GCE flex-start TPU VM via instance_name).
-    `model` defaults to the server's configured MODEL_NAME."""
+    `model` defaults to the model actually being served (else MODEL_NAME)."""
     zone = _zone(zone)
+    if model is None:
+        url = await discover_vllm_url()
+        model = (await _get_served_model_id(url) if url else None) or MODEL_NAME
     # String args are shell-quoted because the command runs remotely via `ssh --command`.
     benchmark_cmd = (
         "vllm bench serve "
         f"--backend {shlex.quote(backend)} "
-        f"--model {shlex.quote(model or MODEL_NAME)} "
+        f"--model {shlex.quote(model)} "
         f"--dataset-name {shlex.quote(dataset_name)} "
         f"--num-prompts {int(num_prompts)} "
         f"--random-input-len {int(random_input_len)} "

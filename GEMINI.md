@@ -17,7 +17,7 @@ This repository packages a Claude Code skill (`tpu-management`) and a **Model Co
 
 Key entrypoints in the codebase:
 
-- **MCP server source:** [server.py](server.py) — the authoritative `tpu-devops` FastMCP agent (~40 tools)
+- **MCP server source:** [server.py](server.py) — the authoritative `tpu-devops` FastMCP agent (full tool catalog in `SKILL.md` / the `get_help` tool)
 - **Skill definition:** [.claude/skills/tpu-management/SKILL.md](.claude/skills/tpu-management/SKILL.md) — lifecycle, tool catalog, required vLLM flags, field notes
 - **Installer:** [project-setup.sh](project-setup.sh) — one-command skill install + MCP registration
 - **Root Makefile:** [Makefile](Makefile) — `skill` / `skill-install` / `skill-package` / `init` targets
@@ -70,7 +70,7 @@ model_list:
 
 Adjust `model` to match the served model (`MODEL_NAME` env var of the agent), e.g. `openai/google/gemma-4-12B-it` or `openai/google/gemma-4-E4B-it`.
 
-### 3. Run Proxy & Export Variables
+### 3. Run Proxy & Point Gemini CLI at It
 
 Run the proxy locally:
 
@@ -78,13 +78,19 @@ Run the proxy locally:
 litellm --config litellm_config.yaml --port 4000
 ```
 
-Then configure your shell environment:
+The `model_group_alias` mapping above is what does the real work: any request the
+Gemini CLI makes for a `gemini-*` model is routed to the self-hosted `gemma4-tpu`
+endpoint. Then point the CLI at the proxy:
 
 ```bash
 export GOOGLE_GEMINI_BASE_URL="http://localhost:4000"
 export GEMINI_API_KEY="local-proxy-token"
 export GEMINI_MODEL="google/gemma-4-31B-it"   # match the served model
 ```
+
+> **Note:** environment-variable names vary between Gemini CLI releases — if the CLI
+> ignores `GOOGLE_GEMINI_BASE_URL`, check `gemini --help` / its settings file for the
+> current base-URL override; the LiteLLM config itself needs no changes.
 
 ---
 

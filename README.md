@@ -79,7 +79,7 @@ Because installs are refresh-and-copy (not symlinks), an installed copy goes sta
 
 | Path | Purpose |
 | :--- | :--- |
-| `server.py` | The `tpu-devops` FastMCP server — the authoritative source (~40 tools) |
+| `server.py` | The `tpu-devops` FastMCP server — the authoritative source (full tool catalog in `SKILL.md` / the `get_help` tool) |
 | `project-setup.sh` | One-command installer: skill + MCP registration for a target project |
 | `refresh_skill.py` | Regenerates the bundled skill snapshots from the repo-root sources |
 | `requirements.txt` | Python dependencies for the MCP server |
@@ -95,12 +95,12 @@ Because installs are refresh-and-copy (not symlinks), an installed copy goes sta
 
 ## 🛠 Features & Capabilities
 
-The `tpu-devops` MCP server exposes ~40 tools covering the full TPU serving lifecycle (catalog with usage guidance in [SKILL.md](.claude/skills/tpu-management/SKILL.md)):
+The `tpu-devops` MCP server covers the full TPU serving lifecycle (catalog with usage guidance in [SKILL.md](.claude/skills/tpu-management/SKILL.md), live listing via the `get_help` tool):
 
-- **Capacity discovery & provisioning:** sweep zones for available TPUs (`find_tpu`), check quotas (`get_zones_with_available_quota`), estimate cost, create flex-start TPU VMs (v6e/v5p) or legacy queued resources (v5e) with an auto-serving startup script.
-- **Serving stack control:** manage the vLLM Docker container (`manage_vllm_docker`), fetch endpoints and deployment configs (gcloud one-liner or GKE manifest), store the HF token in Secret Manager.
-- **Health, logs & diagnostics:** system status dashboard, model health verification, vLLM/docker/system/serial logs, Cloud Logging retrieval, and Gemma-4-powered log triage (`analyze_cloud_logging`).
-- **Inference & benchmarking:** query the deployed Gemma 4 endpoint (with latency stats), run `vllm bench serve` for TTFT/throughput/P95 metrics.
+- **Capacity discovery & provisioning:** sweep zones for available capacity (`find_tpu_vm` for flex-start VMs, `find_tpu` for queued resources), check quotas (`get_zones_with_available_quota`), estimate cost, create flex-start TPU VMs (v6e/v5p) or legacy queued resources (v5e) with an auto-serving startup script, then `wait_for_vllm_ready` until the model is up.
+- **Serving stack control:** manage the vLLM Docker container (`manage_vllm_docker` — works on both flex-start VMs and queued-resource nodes), fetch endpoints and the gcloud deployment one-liner, store the HF token in Secret Manager.
+- **Health, logs & diagnostics:** system status dashboard covering both serving paths, model health verification, vLLM/docker/system/serial logs, Cloud Logging retrieval, and Gemma-4-powered log triage (`analyze_cloud_logging`).
+- **Inference & benchmarking:** query the deployed Gemma 4 endpoint (optional TTFT/throughput stats), run `vllm bench serve` for benchmark metrics.
 - **Universal SRE help:** a standardized `get_help` tool describing the active configuration and all exposed tools.
 
 ---
@@ -121,7 +121,7 @@ Edit the repo-root sources (`server.py`, `tpu.md`, `project-setup.sh`), then run
 
 ## ⚙️ Configuration
 
-The server reads its configuration from environment variables: `GOOGLE_CLOUD_PROJECT`, `MODEL_NAME`, `ACCELERATOR_TYPE`, `TENSOR_PARALLEL_SIZE` (zone defaults to `europe-west4-a` in code). Prerequisites: `pip install -r requirements.txt`, an authenticated `gcloud` CLI with alpha components, the TPU API enabled, and a Hugging Face token stored as Secret Manager secret `hf-token` (the `save_hf_token` tool does this for you).
+The server reads its configuration from environment variables: `GOOGLE_CLOUD_PROJECT` (falls back to the active gcloud config), `GOOGLE_CLOUD_ZONE` (default `europe-west4-a`), `GOOGLE_CLOUD_REGION`, `MODEL_NAME`, `ACCELERATOR_TYPE`, `TENSOR_PARALLEL_SIZE`. Prerequisites: `pip install -r requirements.txt`, an authenticated `gcloud` CLI with alpha components, the TPU API enabled, and a Hugging Face token stored as Secret Manager secret `hf-token` (the `save_hf_token` tool does this for you).
 
 ---
 

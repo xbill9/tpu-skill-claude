@@ -88,13 +88,18 @@ A Hugging Face token must exist as Secret Manager secret `hf-token` (save one wi
 4. **Serve.** The creation startup script auto-starts vLLM. Otherwise
    `manage_vllm_docker` with action `start|stop|restart|status|log|rm` (targets the
    queued resource's node by default, or a GCE VM via `instance_name` — same for
-   `get_vllm_docker_logs`, `get_tpu_system_logs`, `run_vllm_benchmark`). It auto-picks
+   `get_vllm_docker_logs`, `get_tpu_system_logs`, `run_vllm_benchmark`).
+   **Switching the model:** call `start` with `model_name` (or any serving param) —
+   that replaces the container with the new config; a plain `start` just restarts
+   the existing container unchanged. It auto-picks
    load format, max-model-len, and memory utilization from the model size
    (26B/31B → `tpu_streaming_loader`, 16384 ctx, 0.80 util; smaller → `runai_streamer`,
    65536 ctx, 0.90 util). Model load can take many minutes — check
    `get_vllm_docker_logs` for "Application startup complete."
 5. **Verify.** `verify_model_health`, `get_vllm_endpoint`, `get_model_details`,
-   `query_queued_gemma4` (`include_stats=True` for TTFT/throughput).
+   `query_queued_gemma4` (`include_stats=True` for TTFT/throughput). Health checks,
+   queries, and benchmarks auto-target whatever model the server actually loaded
+   (via `/v1/models`), so they keep working after a deploy-time `model_name` override.
 6. **Benchmark (optional).** `run_vllm_benchmark` (runs `vllm bench serve` in a
    separate container on the VM).
 7. **Tear down.** `destroy_queued_resource`. Flex-start bills until deletion and

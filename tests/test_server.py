@@ -92,6 +92,26 @@ class HelperTests(unittest.TestCase):
         self.assertIn("$21.60", result)  # 8 chips * 1.35 * 2h
         self.assertTrue(run(server.estimate_deployment_cost(topology="0x4")).startswith("❌"))
 
+    def test_min_chips_for_model(self):
+        self.assertEqual(server._min_chips_for_model("google/gemma-4-31B-it"), 4)
+        self.assertEqual(server._min_chips_for_model("google/gemma-4-12B-it"), 1)
+        self.assertEqual(server._min_chips_for_model("google/gemma-4-E2B-it"), 1)
+        # Quantized checkpoints fit on a single chip regardless of size
+        self.assertEqual(server._min_chips_for_model("google/gemma-4-26B-it-qat-q4_0"), 1)
+        self.assertEqual(server._min_chips_for_model("google/gemma-4-31B-it-int4"), 1)
+
+    def test_create_blocks_model_too_big_for_accelerator(self):
+        result = run(
+            server.create_tpu_vm_instance(
+                accelerator="v6e-1", model_name="google/gemma-4-31B-it"
+            )
+        )
+        self.assertTrue(result.startswith("❌"))
+        self.assertIn("chips", result)
+
+    def test_served_model_id_falls_back_to_none_when_unreachable(self):
+        self.assertIsNone(run(server._get_served_model_id("http://127.0.0.1:9")))
+
     def test_run_command_success_and_timeout(self):
         rc, out, _ = run(server.run_command(["echo", "hi"]))
         self.assertEqual((rc, out), (0, "hi"))

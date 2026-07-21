@@ -1,22 +1,3 @@
-# TPU Builders getting started guide
-
-> **Note:** This is a text-only copy of the repository's `tpu.md` (461 KB original). The
-> embedded base64 screenshots for the Cloud Console walkthrough have been stripped;
-> `![][imageN]` markers show where they appeared. See the original `tpu.md` at the repo
-> root for the images.
-
-# TPU Builders Program Getting Started Guide Last Updated Jul 14, 2026
-
-| *This is a live document. If you encounter anything that could be improved email : tpu-builders-support@google.com and we will update the document accordingly.* |
-| :---: |
-
-Welcome to the TPU Builders Program\! This guide will walk you through the process of setting up your Google Cloud environment, acquiring TPU capacity, and managing your credits.
-
-* If you have trouble accessing the TPUs below (or any other questions), please email [tpu-builders-support@google.com](mailto:tpu-builders-support@google.com)
-
-| Applied for your credits? *Note for all builders: Whether you were accepted via the academic program or the developer stream, you must still [submit the final credit application](https://forms.gle/FyaaAQLNXmTdjgit9) to receive your cloud credits.* Be aware that it typically takes 2-3 weeks to process your application and award the credits to your billing account. |
-| ----- |
-
 ## New to TPUs?
 
 * See [How To Scale Your Model](https://jax-ml.github.io/scaling-book/) for a technical overview.  
@@ -50,15 +31,13 @@ To proactively verify your billing configuration, default VPC setup, organizatio
 curl -sSO https://gist.githubusercontent.com/RobMulla/ee1a530f9ff0bdb9aa5b493c7faf9aa2/raw/tpu_diagnostic.py && python3 tpu_diagnostic.py
 ```
 
-Running this check can be helpful when diagnosing problems if you need to email [tpu-builders-support@google.com](mailto:tpu-builders-support@google.com).
-
 ## Requesting a TPU
 
 You can request TPU capacity directly as a Compute Engine VM instance using the **`FLEX_START`** provisioning model.
 
 *Note: you can now create a TPU through the cloud console.* [Click here for a walkthrough with screenshots]().
 
-Flex-start capacity is shared among all builders in specific zones. You can create a flex-start instance only through the command line, as flex-start is a new feature currently unsupported in the Cloud Console UI. Learn more about [TPU resources in Compute Engine](https://docs.cloud.google.com/compute/docs/tpus/tpu-resources-in-compute-engine) and review the guide on [About Flex-start VMs](https://docs.cloud.google.com/compute/docs/instances/about-flex-start-vms). You can find pricing for these options [here](https://cloud.google.com/products/dws/pricing?e=48754805#flex-start-tpu-vm-pricing).
+Flex-start capacity is shared in specific zones. You can create a flex-start instance only through the command line, as flex-start is a new feature currently unsupported in the Cloud Console UI. Learn more about [TPU resources in Compute Engine](https://docs.cloud.google.com/compute/docs/tpus/tpu-resources-in-compute-engine) and review the guide on [About Flex-start VMs](https://docs.cloud.google.com/compute/docs/instances/about-flex-start-vms). You can find pricing for these options [here](https://cloud.google.com/products/dws/pricing?e=48754805#flex-start-tpu-vm-pricing).
 
 *(Note: TPU v5e utilizes a different API command structure but will be migrating in the future months)*
 
@@ -75,7 +54,6 @@ Flex-start capacity is shared among all builders in specific zones. You can crea
 | **v5e** | us-west4-a | legacy API only | 2x4 or smaller (Serving)  Between 4x4 and 8x16 (Training) | flex-start (legacy) |
 | **v5e** | europe-west4-b | legacy API only | 2x4 or smaller (Serving)  Between 4x4 and 8x16 (Training) | flex-start (legacy) |
 
-*Note: If you have trouble securing the capacity you need, please contact us at [tpu-builders-support@google.com](mailto:tpu-builders-support@google.com)*
 
 ## 
 
@@ -121,7 +99,6 @@ gcloud compute instances create tpu-v5p-vm \
 
 ### TPU v5e Serving (us-west4-a / europe-west4-b)
 
-*Note: The v5e Alpha API is currently experiencing a backend quota issue that may cause your request to crash with "Code 13: Internal Error" during provisioning. If this happens, please email support ([tpu-builders-support@google.com](mailto:tpu-builders-support@google.com)) so we can manually allowlist your project for v5e capacity.*
 
 To request a TPU v5e serving instance, use the Cloud TPU API:
 
@@ -223,18 +200,6 @@ gcloud compute instances create my-tpu-vm \
     --metadata-from-file=startup-script=startup.sh
 ```
 
-##  
-
-## Understanding TPU Quotas
-
-Before manually checking quotas, we highly recommend running the [**Pre-Flight Diagnostics Script**](#run-pre-flight-diagnostics-script-\(recommended\)). The resulting **`tpu_diagnostic_report.txt`** file will explicitly list your current active limits across all regions, removing any guesswork\!
-
-| *Important: The “`GPUS_ALL_REGIONS”` Block* If your diagnostic script or the [Cloud Console (click here to check)](https://console.cloud.google.com/iam-admin/quotas?metric=compute.googleapis.com%2Fgpus_all_regions) shows that your `GPUS_ALL_REGIONS` quota is exactly 0, your entire project is globally restricted from using any accelerators (GPUs or TPUs). This is a standard Google Cloud security measure for new billing accounts. If you see this block, do not try to manually request TPU quota yet. Instead please email [`tpu-builders-support@google.com`](mailto:tpu-builders-support@google.com) immediately so we can help you clear the global restriction first. |
-| :---- |
-
-When requesting TPUs, you may encounter quota limits. The TPU Builders Program grants you baseline access based on your reputation, but depending on the region and the API you are using, you might need to manually request an increase in the Cloud Console.
-
-If your diagnostic report shows a quota of 0 for your desired region, you will need to request an increase. The process depends entirely on which architecture you are trying to use:
 
 ### For v6e and v5p architectures:
 
@@ -248,7 +213,7 @@ These modern architectures rely on the standard Google Cloud Engine (GCE) quota 
 1. Click the specific link for your TPU generation above (ensure your project is selected at the top of the Google Cloud Console).  
 2. Check the box next to your desired Region (e.g., `us-central1`).  
 3. Click **Edit Quotas** at the top right of the page.  
-4. Enter the number of chips you need (e.g., `16`). In the **“Request description”** field, please mention that you are part of the TPU Builders Program to help the capacity team identify and prioritize your request, then click submit.  
+4. Enter the number of chips you need (e.g., `16`).   
 5. *Note: Quota requests may take up to 2 business days for review. If you receive an immediate automated rejection, it is likely because your billing account is brand new. Please wait 48 hours and try again, or email support.*
 
 ### For v5e architectures:
@@ -272,28 +237,10 @@ To help you get started as quickly as possible, we have compiled a list of recom
 | **vLLM TPU** | High-throughput, memory-efficient serving of large language and multimodal models | • [vLLM TPU Project Documentation](https://docs.vllm.ai/projects/tpu/en/latest/) |
 | **MaxText** | Training and fine tuning highly scalable, high-performance open-source LLMs written in pure JAX | [https://patricktoulme.substack.com/p/frontier-pretraining-infrastructure](https://patricktoulme.substack.com/p/frontier-pretraining-infrastructure) [Supervised fine tuning on a single host with MaxText](https://maxtext.readthedocs.io/en/latest/tutorials/posttraining/sft.html) |
 
-## Get support
-
-This is a new program at Google. Expect bugs and rough edges as you get started. We’re here to help\! If you face any blockers, please email [**tpu-builders-support@google.com**](mailto:tpu-builders-support@google.com) immediately with your Project ID.
-
 ---
 
 ##  Troubleshooting & FAQ
 
-This section compiles the most common questions and issues encountered by builders during onboarding.
-
-**Q: Why is my request stuck in `WAITING_FOR_RESOURCES` / `PROVISIONING` indefinitely or failing with `STOCKOUT` / `RESOURCE_POOL_EXHAUSTED`?**
-
-**A:** New Google Cloud projects default to a limit of 0.0 for the GPUS\_ALL\_REGIONS (Global Accelerator Quota) metric. Even if your regional TPU quota shows active allocation, this global limit blocks Google Cloud from actually spinning up your instance. This is an anti-fraud safeguard. To fix this:
-
-1. **Link a Billing Account**: Go to the Cloud Console \-\> Billing and ensure your project has an active, linked paid billing account (credits/coupons alone are not enough if billing is disabled).  
-2. **Increase Billing Reputation (Credit Card/Bank Link)**: To verify your identity and automatically lift anti-fraud limits, link a valid credit card or bank account to your billing profile in the Console. (This is for identity verification and will *not* charge your card if you are funded by credits).  
-3. **Institutional / Invoice Override fallback**: If you are using a university-managed invoice account and cannot associate a personal card, you must email your Billing Account ID to [tpu-builders-support@google.com](mailto:tpu-builders-support@google.com) so our team can request a manual reputation whitelist from the GCP billing backend.  
-4. **Request Quota Increase**: Once billing is verified, go to IAM & Admin \> Quotas in the Google Cloud Console, search for `GPUS_ALL_REGIONS`, click Edit Quotas, and request an increase to 8 or 16\.  
-5. **Resubmit Request**: Once approved, delete your stuck instance (`gcloud compute instances delete <VM_NAME> --zone=<ZONE> --quiet` or the legacy queued-resource command `gcloud alpha compute tpus queued-resources delete <QR_NAME> --zone=<ZONE> --force`) and submit your request again.
-
-**Q: Why am I getting `Error: code 10, Failed to perform tenant project creation` when I submit my TPU request?**  
-**A:** This typically happens if you are reusing a legacy Google Cloud project that was previously associated with other programs (such as the legacy TPU Research Credits program), or if a prior setup was deleted incorrectly. To resolve this, **always create a completely net-new, isolated Google Cloud project** for the TPU Builders Program.
 
 **Q: Why did my TPU instance or training job suddenly terminate after exactly 24 hours?**  
 **A:** By default, Flex-Start VM instances are set to terminate after 24 hours. To run your training jobs for up to 7 days, append the `--max-run-duration=168h` and `--instance-termination-action=DELETE` flags to your creation command:
@@ -330,7 +277,6 @@ gcloud storage buckets add-iam-policy-binding gs://YOUR_BUCKET_NAME \
 
 ## Resources
 
-* TPU Tech Talk Drive with All the Current and Future Talks \- [https://drive.google.com/corp/drive/folders/0AMhcsHWo8uP0Uk9PVA](https://drive.google.com/corp/drive/folders/0AMhcsHWo8uP0Uk9PVA)  
 * JAX Resources \- [https://github.com/rcrowe-google/Learning-JAX](https://github.com/rcrowe-google/Learning-JAX)  
 * Introduction to TPU \- [https://jax-ml.github.io/scaling-book/](https://jax-ml.github.io/scaling-book/)
 

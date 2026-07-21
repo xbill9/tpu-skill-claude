@@ -109,7 +109,7 @@ def _zone(zone: Optional[str]) -> str:
     return zone or ZONE
 
 
-async def _get_node_id(resource_id: str) -> Optional[str]:
+async def _get_node_id(resource_id: str, zone: Optional[str] = None) -> Optional[str]:
     """Retrieves the node ID for a given Queued Resource."""
     cmd = [
         "gcloud",
@@ -120,11 +120,50 @@ async def _get_node_id(resource_id: str) -> Optional[str]:
         "describe",
         resource_id,
         f"--project={PROJECT_ID}",
-        f"--zone={ZONE}",
+        f"--zone={_zone(zone)}",
         "--format=value(tpu.nodeSpec[0].nodeId)",
     ]
     rc, node_id, _ = await run_command(cmd)
     return node_id.strip() if rc == 0 and node_id else None
+
+
+async def _build_tpu_ssh_cmd(
+    remote_cmd: str, resource_id: str, instance_name: Optional[str], zone: str
+) -> tuple[Optional[list[str]], str]:
+    """Builds the gcloud SSH argv for either serving host: a GCE flex-start TPU VM
+    when instance_name is given, else the queued resource's node. Returns
+    (argv, target_name); argv is None with an error message in target_name."""
+    if instance_name:
+        argv = [
+            "gcloud",
+            "compute",
+            "ssh",
+            instance_name,
+            f"--zone={zone}",
+            f"--project={PROJECT_ID}",
+            "--command",
+            remote_cmd,
+        ]
+        return argv, instance_name
+    node_id = await _get_node_id(resource_id, zone)
+    if not node_id:
+        return None, (
+            f"❌ Could not find node for resource {resource_id}. Ensure it is ACTIVE, "
+            "or pass instance_name to target a GCE flex-start TPU VM instead."
+        )
+    argv = [
+        "gcloud",
+        "compute",
+        "tpus",
+        "tpu-vm",
+        "ssh",
+        node_id,
+        f"--zone={zone}",
+        f"--project={PROJECT_ID}",
+        "--command",
+        remote_cmd,
+    ]
+    return argv, node_id
 
 
 async def _get_node_ip(node_id: str) -> Optional[str]:
@@ -347,36 +386,6 @@ async def get_vllm_deployment_config(service_name: str = "vllm-gemma4-qr", model
         f"Requires the `{HF_SECRET_ID}` secret (save one with `save_hf_token`) and "
         "`roles/secretmanager.secretAccessor` on the VM's service account."
     )
-
-
-@mcp.tool(title="Generate GKE TPU manifest", annotations=READ_ONLY)
-async def get_vllm_tpu_deployment_config() -> str:
-    """Generates GKE manifests for TPU-based deployments."""
-    manifest = f"""apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: vllm-gemma4-tpu
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: vllm-gemma4-tpu
-  template:
-    metadata:
-      labels:
-        app: vllm-gemma4-tpu
-    spec:
-      containers:
-      - name: vllm-container
-        image: vllm/vllm-tpu:nightly
-        resources:
-          limits:
-            google.com/tpu: "{TENSOR_PARALLEL_SIZE}"
-        env:
-        - name: MODEL_NAME
-          value: {MODEL_NAME}
-"""
-    return manifest
 
 
 # --- MCP Tools ---
@@ -769,6 +778,52 @@ async def get_tpu_vm_endpoint(instance_name: str, zone: Optional[str] = None) ->
     return f"### Endpoints for `{instance_name}`\n" + "\n".join(report)
 
 
+@mcp.tool(title="Wait for vLLM ready", annotations=READ_ONLY)
+async def wait_for_vllm_ready(
+    instance_name: str = "vllm-gemma4-vm",
+    zone: Optional[str] = None,
+    timeout_minutes: Annotated[int, Field(ge=1, le=30)] = 15,
+) -> str:
+    """Polls a GCE flex-start TPU VM every 30s until vLLM serving is ready, checking
+    the health endpoint and the serial-console startup marker. One call replaces
+    manual serial-log polling; model load typically takes ~10 min. Also fails fast
+    if the startup script logs an ERROR (e.g. Secret Manager access denied)."""
+    zone = _zone(zone)
+    deadline = time.monotonic() + timeout_minutes * 60
+    last_signal = "no serial output yet"
+    while True:
+        external, internal = await _get_instance_ips(instance_name, zone)
+        for ip in (external, internal):
+            if not ip:
+                continue
+            try:
+                async with httpx.AsyncClient(timeout=5) as client:
+                    res = await client.get(f"http://{ip}:8000/health")
+                if res.status_code == 200:
+                    return f"🟢 vLLM is serving on `{instance_name}` at http://{ip}:8000 (health check passed)."
+            except Exception:
+                pass
+
+        serial = await get_tpu_vm_serial_log(instance_name, zone=zone, tail=40)
+        if "vLLM application startup complete." in serial:
+            return (
+                f"🟢 vLLM startup complete on `{instance_name}` (serial-console marker). "
+                "Port 8000 isn't reachable from here — likely firewall; serving is up inside the VPC."
+            )
+        error_lines = [line for line in serial.splitlines() if line.startswith("ERROR:")]
+        if error_lines:
+            return f"❌ Startup failed on `{instance_name}`:\n" + "\n".join(error_lines)
+        if not serial.startswith("❌") and serial.strip():
+            last_signal = serial.splitlines()[-1]
+
+        if time.monotonic() >= deadline:
+            return (
+                f"⏳ Not ready after {timeout_minutes} min. Last serial output: {last_signal}\n"
+                "Keep watching with `get_tpu_vm_serial_log`."
+            )
+        await asyncio.sleep(30)
+
+
 async def _get_zones_with_available_quota_list(
     service: str = "tpu.googleapis.com",
     quota_id: str = "TPUV6EPerProjectPerZoneForTPUAPI",
@@ -980,10 +1035,63 @@ async def find_tpu(
     return "❌ Failed to start TPU in any zone. Attempted zones:\n" + "\n".join(attempts)
 
 
+@mcp.tool(title="Find flex-start TPU VM capacity", annotations=WRITE)
+async def find_tpu_vm(
+    instance_name: str = "vllm-gemma4-vm",
+    accelerator: Annotated[str, Field(description="TPU type: v6e-1, v6e-4, v6e-8, or v5p-8")] = ACCELERATOR_TYPE,
+    zones: Annotated[
+        Optional[list[str]],
+        Field(description="Zones to try in order; defaults to the zones with TPU quota"),
+    ] = None,
+    model_name: Optional[str] = None,
+    per_zone_wait: Annotated[
+        str, Field(description="How long each zone's flex-start request stays valid, e.g. '5m'")
+    ] = "5m",
+) -> str:
+    """GCE counterpart of `find_tpu`: tries flex-start TPU VM creation across zones
+    until one grants capacity. TPUS_PER_TPU_FAMILY quota is only discoverable by
+    attempting creation, so quota failures fail fast and the sweep moves on; each
+    attempt's request expires after `per_zone_wait` so no pending requests pile up.
+    On success, switches the server's default zone to the winning zone. Follow up
+    with `wait_for_vllm_ready`."""
+    candidate_zones = zones or await _get_zones_with_available_quota_list()
+    if not candidate_zones:
+        return "❌ No candidate zones: no zones with TPU quota found — pass `zones` explicitly."
+
+    attempts = []
+    for zone in candidate_zones:
+        logger.info(f"Attempting flex-start TPU VM {instance_name} in {zone}...")
+        result = await create_tpu_vm_instance(
+            instance_name=instance_name,
+            zone=zone,
+            accelerator=accelerator,
+            model_name=model_name,
+            request_valid_for=per_zone_wait,
+        )
+        attempts.append(f"- **{zone}**: {result.splitlines()[0]}")
+        if result.startswith("🚀"):
+            global ZONE
+            ZONE = zone
+            return (
+                f"✅ Flex-start TPU VM secured in `{zone}` (now the default zone).\n\n{result}\n\n"
+                "**Attempts:**\n" + "\n".join(attempts)
+            )
+        if result.startswith("⏳"):
+            # gcloud timed out with the request possibly still pending in this zone;
+            # stop so we don't stack pending capacity requests across zones.
+            return f"{result}\n\n**Attempts:**\n" + "\n".join(attempts)
+
+    return "❌ No zone granted flex-start capacity.\n**Attempts:**\n" + "\n".join(attempts)
+
+
 @mcp.tool(title="Manage vLLM container", annotations=DESTRUCTIVE)
 async def manage_vllm_docker(
     resource_id: str = "vllm-gemma4-qr",
     action: Literal["start", "stop", "restart", "status", "log", "rm"] = "start",
+    instance_name: Annotated[
+        Optional[str], Field(description="GCE flex-start TPU VM name; targets it instead of a queued resource")
+    ] = None,
+    zone: Optional[str] = None,
     model_name: Annotated[
         Optional[str], Field(description="Hugging Face model ID; defaults to the configured MODEL_NAME")
     ] = None,
@@ -998,12 +1106,10 @@ async def manage_vllm_docker(
         Optional[float], Field(gt=0, le=1, description="Memory utilization fraction; auto-picked from model size")
     ] = None,
 ) -> str:
-    """Manages the vLLM Docker container on the TPU VM ('start' creates and runs it
-    if it doesn't exist yet)."""
-    node_id = await _get_node_id(resource_id)
-    if not node_id:
-        return f"❌ Could not find node for resource {resource_id}. Ensure it is ACTIVE."
-
+    """Manages the vLLM Docker container on the serving host ('start' creates and runs
+    it if it doesn't exist yet). Targets the queued resource's node by default, or a
+    GCE flex-start TPU VM when instance_name is given."""
+    zone = _zone(zone)
     selected_model = model_name or MODEL_NAME
     # Auto-detect defaults based on model name
     is_large = "26B" in selected_model or "31B" in selected_model
@@ -1039,27 +1145,18 @@ async def manage_vllm_docker(
         "log": "sudo docker logs --tail 100 vllm-gemma4",
         "rm": "sudo docker rm -f vllm-gemma4",
     }
-    ssh_cmd = [
-        "gcloud",
-        "compute",
-        "tpus",
-        "tpu-vm",
-        "ssh",
-        node_id,
-        f"--zone={ZONE}",
-        f"--project={PROJECT_ID}",
-        "--command",
-        commands[action],
-    ]
+    ssh_cmd, target = await _build_tpu_ssh_cmd(commands[action], resource_id, instance_name, zone)
+    if ssh_cmd is None:
+        return target
 
     # 'start' may fall back to `docker run`, which pulls the vLLM image (~5 min)
     # when it isn't cached — don't kill the client mid-pull.
     timeout = 600 if action in ("start", "restart") else 60
     rc, out, err = await run_command(ssh_cmd, timeout=timeout)
     if rc != 0:
-        return f"""⚠️ Docker {action} failed, but reservation {resource_id} remains safe.
+        return f"""⚠️ Docker {action} failed on {target}, but the TPU itself remains safe.
 Error: {err}"""
-    return f"""✅ Docker {action} command executed on {node_id}.
+    return f"""✅ Docker {action} command executed on {target}.
 {out}"""
 
 
@@ -1157,8 +1254,9 @@ async def estimate_deployment_cost(
 
 @mcp.tool(title="System status dashboard", annotations=READ_ONLY)
 async def get_system_status() -> str:
-    """Provides a high-level dashboard of system status."""
-    resources_str = await list_queued_resources()
+    """High-level dashboard covering both serving paths: GCE flex-start TPU VMs
+    (all zones) and Queued Resources (current zone), plus vLLM health."""
+    vms_str, resources_str = await asyncio.gather(list_tpu_vm_instances(), list_queued_resources())
     health = "🔴 Offline"
     url = await discover_vllm_url()
     if url:
@@ -1170,15 +1268,23 @@ async def get_system_status() -> str:
         except Exception:
             pass
 
-    next_step = "Call `create_tpu_vm_instance` (or `manage_queued_resource`) to provision infrastructure."
-    if "ACTIVE" in resources_str:
+    if "🟢" in health:
+        next_step = "Use `query_queued_gemma4` to interact with the model."
+    elif "RUNNING" in vms_str or "ACTIVE" in resources_str:
         next_step = (
-            "Use `query_queued_gemma4` to interact with the model."
-            if "🟢" in health
-            else "Use `manage_vllm_docker` with action='start' to start the service."
+            "Capacity is up but serving isn't reachable — check `get_tpu_vm_serial_log` / "
+            "`wait_for_vllm_ready` (GCE VM) or `manage_vllm_docker` with action='status'."
         )
+    else:
+        next_step = "Call `create_tpu_vm_instance` (or `find_tpu_vm` to sweep zones) to provision infrastructure."
 
-    return f"### 🌀 System Status ({ZONE})\n- **vLLM Health:** {health}\n{resources_str}\n**👉 Next Step:** {next_step}"
+    return (
+        f"### 🌀 System Status ({ZONE})\n"
+        f"- **vLLM Health:** {health}\n\n"
+        f"**GCE flex-start TPU VMs (all zones):**\n```\n{vms_str}\n```\n"
+        f"{resources_str}\n"
+        f"**👉 Next Step:** {next_step}"
+    )
 
 
 @mcp.tool(title="Get vLLM endpoint", annotations=READ_ONLY)
@@ -1259,6 +1365,10 @@ async def query_queued_gemma4(prompt: str, include_stats: bool = False) -> str:
 @mcp.tool(title="Run vLLM benchmark", annotations=WRITE)
 async def run_vllm_benchmark(
     resource_id: str = "vllm-gemma4-qr",
+    instance_name: Annotated[
+        Optional[str], Field(description="GCE flex-start TPU VM name; targets it instead of a queued resource")
+    ] = None,
+    zone: Optional[str] = None,
     backend: str = "vllm",
     model: Optional[str] = None,
     dataset_name: str = "random",
@@ -1267,12 +1377,10 @@ async def run_vllm_benchmark(
     random_output_len: int = 128,
     max_concurrency: Optional[int] = None,
 ) -> str:
-    """Runs vLLM's internal benchmark tool inside the container on the TPU VM.
+    """Runs vLLM's internal benchmark tool in a separate container on the serving host
+    (queued resource node by default, or a GCE flex-start TPU VM via instance_name).
     `model` defaults to the server's configured MODEL_NAME."""
-    node_id = await _get_node_id(resource_id)
-    if not node_id:
-        return f"❌ Could not find node for resource {resource_id}. Ensure it is ACTIVE."
-
+    zone = _zone(zone)
     # String args are shell-quoted because the command runs remotely via `ssh --command`.
     benchmark_cmd = (
         "vllm bench serve "
@@ -1294,92 +1402,69 @@ async def run_vllm_benchmark(
         f"vllm/vllm-tpu:nightly {benchmark_cmd}"
     )
 
-    ssh_cmd = [
-        "gcloud",
-        "compute",
-        "tpus",
-        "tpu-vm",
-        "ssh",
-        node_id,
-        f"--zone={ZONE}",
-        f"--project={PROJECT_ID}",
-        "--command",
-        docker_cmd,
-    ]
+    ssh_cmd, target = await _build_tpu_ssh_cmd(docker_cmd, resource_id, instance_name, zone)
+    if ssh_cmd is None:
+        return target
 
     rc, out, err = await run_command(ssh_cmd, timeout=600)  # Increased timeout for benchmark
     if rc != 0:
-        return f"""⚠️ Benchmark failed on {node_id}.
+        return f"""⚠️ Benchmark failed on {target}.
 Error: {err}
 Output: {out}"""
-    return f"""✅ Benchmark completed on {node_id}:
+    return f"""✅ Benchmark completed on {target}:
 {out}"""
 
 
 @mcp.tool(title="Get vLLM container logs", annotations=READ_ONLY)
 async def get_vllm_docker_logs(
-    resource_id: str = "vllm-gemma4-qr", tail: Annotated[int, Field(ge=1, le=5000)] = 100
+    resource_id: str = "vllm-gemma4-qr",
+    instance_name: Annotated[
+        Optional[str], Field(description="GCE flex-start TPU VM name; targets it instead of a queued resource")
+    ] = None,
+    zone: Optional[str] = None,
+    tail: Annotated[int, Field(ge=1, le=5000)] = 100,
 ) -> str:
-    """Retrieves the last `tail` lines of the vLLM Docker container's logs on the TPU VM
-    (bounded — the full log of a long-serving container can run to megabytes)."""
-    node_id = await _get_node_id(resource_id)
-    if not node_id:
-        return f"❌ Could not find node for resource {resource_id}. Ensure it is ACTIVE."
-
+    """Retrieves the last `tail` lines of the vLLM Docker container's logs from the
+    serving host (queued resource node by default, or a GCE flex-start TPU VM via
+    instance_name). Bounded — the full log of a long-serving container can run to
+    megabytes."""
     log_cmd = f"sudo docker logs vllm-gemma4 --tail {int(tail)}"
 
-    ssh_cmd = [
-        "gcloud",
-        "compute",
-        "tpus",
-        "tpu-vm",
-        "ssh",
-        node_id,
-        f"--zone={ZONE}",
-        f"--project={PROJECT_ID}",
-        "--command",
-        log_cmd,
-    ]
+    ssh_cmd, target = await _build_tpu_ssh_cmd(log_cmd, resource_id, instance_name, _zone(zone))
+    if ssh_cmd is None:
+        return target
 
     rc, out, err = await run_command(ssh_cmd)
     if rc != 0:
-        return f"""⚠️ Failed to get Docker logs from {node_id}.
+        return f"""⚠️ Failed to get Docker logs from {target}.
 Error: {err}"""
-    return f"""✅ Docker logs from {node_id}:
+    return f"""✅ Docker logs from {target}:
 {out}"""
 
 
 @mcp.tool(title="Get TPU system logs", annotations=READ_ONLY)
 async def get_tpu_system_logs(
     resource_id: str = "vllm-gemma4-qr",
+    instance_name: Annotated[
+        Optional[str], Field(description="GCE flex-start TPU VM name; targets it instead of a queued resource")
+    ] = None,
+    zone: Optional[str] = None,
     service: Annotated[str, Field(description="systemd unit name, e.g. 'docker'")] = "docker",
     tail: Annotated[int, Field(ge=1, le=5000)] = 100,
 ) -> str:
-    """Retrieves systemd logs for a specific service from the TPU VM."""
-    node_id = await _get_node_id(resource_id)
-    if not node_id:
-        return f"❌ Could not find node for resource {resource_id}. Ensure it is ACTIVE."
-
+    """Retrieves systemd logs for a specific service from the serving host (queued
+    resource node by default, or a GCE flex-start TPU VM via instance_name)."""
     log_cmd = f"journalctl -u {shlex.quote(service)} -n {int(tail)}"
 
-    ssh_cmd = [
-        "gcloud",
-        "compute",
-        "tpus",
-        "tpu-vm",
-        "ssh",
-        node_id,
-        f"--zone={ZONE}",
-        f"--project={PROJECT_ID}",
-        "--command",
-        log_cmd,
-    ]
+    ssh_cmd, target = await _build_tpu_ssh_cmd(log_cmd, resource_id, instance_name, _zone(zone))
+    if ssh_cmd is None:
+        return target
 
     rc, out, err = await run_command(ssh_cmd)
     if rc != 0:
-        return f"""⚠️ Failed to get system logs from {node_id}.
+        return f"""⚠️ Failed to get system logs from {target}.
 Error: {err}"""
-    return f"""✅ System logs for '{service}' from {node_id}:
+    return f"""✅ System logs for '{service}' from {target}:
 {out}"""
 
 
@@ -1559,6 +1644,8 @@ async def get_help() -> str:
         "### 🧰 Available MCP Tools\n\n"
         "#### 🐳 Capacity & Lifecycle — GCE flex-start TPU VMs (recommended for v6e/v5p)\n"
         "- **`create_tpu_vm_instance`**: Creates a flex-start TPU VM via GCE and auto-starts vLLM.\n"
+        "- **`find_tpu_vm`**: Sweeps zones attempting flex-start creation until one grants capacity.\n"
+        "- **`wait_for_vllm_ready`**: Polls health endpoint + serial marker until serving is up (~10 min loads).\n"
         "- **`list_tpu_vm_instances`**: Lists GCE TPU VM instances (ct6e/ct5p) with IPs and status.\n"
         "- **`destroy_tpu_vm_instance`**: Deletes a GCE TPU VM instance (stops flex-start billing).\n"
         "- **`get_tpu_vm_serial_log`**: Tails a GCE TPU VM's serial console (boot/vLLM progress when SSH is blocked).\n"
@@ -1573,10 +1660,10 @@ async def get_help() -> str:
         "- **`find_gpu`**: GPU VMs, Cloud Run GPU services, and GPU quota in the project.\n"
         "- **`estimate_deployment_cost`**: Rough cost estimate for a TPU deployment.\n\n"
         "#### 🚀 Serving\n"
-        "- **`manage_vllm_docker`**: start/stop/restart/status/log/rm for the vLLM container on the TPU VM.\n"
+        "- **`manage_vllm_docker`**: start/stop/restart/status/log/rm for the vLLM container "
+        "(queued node by default; GCE VM via instance_name).\n"
         "- **`get_vllm_endpoint`**: Active vLLM service URL.\n"
         "- **`get_vllm_deployment_config`**: gcloud one-liner for a single-host TPU vLLM deployment.\n"
-        "- **`get_vllm_tpu_deployment_config`**: GKE manifest for TPU serving.\n"
         "- **`save_hf_token`**: Securely saves a Hugging Face API token to Secret Manager.\n\n"
         "#### 📊 Monitoring & Logs\n"
         "- **`get_system_status`**: High-level status dashboard of TPU node health and vLLM service.\n"

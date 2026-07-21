@@ -71,7 +71,9 @@ A Hugging Face token must exist as Secret Manager secret `hf-token` (save one wi
    `find_gpu`. Never create before checking what already exists.
 2. **Acquire capacity.**
    - Preferred (v6e/v5p): `create_tpu_vm_instance` — GCE flex-start VM with vLLM
-     auto-start; watch boot with `get_tpu_vm_serial_log`.
+     auto-start — or `find_tpu_vm` to sweep zones until one grants capacity (family
+     quota is only discoverable by attempting creation). Then `wait_for_vllm_ready`
+     polls until serving is up; `get_tpu_vm_serial_log` for manual watching.
    - Known zone, legacy API: `create_tpu_queued_resource` (non-destructive; skips if
      the resource already exists) or `manage_queued_resource` (destructive — deletes
      every other queued resource in the zone). Flex-start by default: 4h max-run;
@@ -84,7 +86,9 @@ A Hugging Face token must exist as Secret Manager secret `hf-token` (save one wi
    Queued resources move QUEUED → PROVISIONING → ACTIVE; FAILED/SUSPENDED means
    delete and retry (the manage tool does this automatically).
 4. **Serve.** The creation startup script auto-starts vLLM. Otherwise
-   `manage_vllm_docker` with action `start|stop|restart|status|log|rm`. It auto-picks
+   `manage_vllm_docker` with action `start|stop|restart|status|log|rm` (targets the
+   queued resource's node by default, or a GCE VM via `instance_name` — same for
+   `get_vllm_docker_logs`, `get_tpu_system_logs`, `run_vllm_benchmark`). It auto-picks
    load format, max-model-len, and memory utilization from the model size
    (26B/31B → `tpu_streaming_loader`, 16384 ctx, 0.80 util; smaller → `runai_streamer`,
    65536 ctx, 0.90 util). Model load can take many minutes — check
@@ -101,7 +105,8 @@ A Hugging Face token must exist as Secret Manager secret `hf-token` (save one wi
 
 **Capacity & lifecycle (GCE flex-start — recommended for v6e/v5p):**
 `create_tpu_vm_instance` (creates the VM with the proven flags: 200GB boot disk,
-docker-installing startup script, cloud-platform scopes), `list_tpu_vm_instances`,
+docker-installing startup script, cloud-platform scopes), `find_tpu_vm` (zone sweep),
+`wait_for_vllm_ready` (poll until serving), `list_tpu_vm_instances`,
 `destroy_tpu_vm_instance`, `get_tpu_vm_serial_log`, `get_tpu_vm_endpoint`
 
 **Capacity & lifecycle (queued resources — legacy, v5e):** `find_tpu`,
@@ -111,8 +116,7 @@ docker-installing startup script, cloud-platform scopes), `list_tpu_vm_instances
 `get_zones_with_available_quota`, `find_gpu`, `estimate_deployment_cost`
 
 **Serving:** `manage_vllm_docker`, `get_vllm_endpoint`,
-`get_vllm_deployment_config` (gcloud one-liner), `get_vllm_tpu_deployment_config`
-(GKE manifest), `save_hf_token`
+`get_vllm_deployment_config` (gcloud one-liner), `save_hf_token`
 
 **Health, logs & diagnostics:** `get_system_status`, `verify_model_health`,
 `get_model_details`, `get_metrics`, `get_vllm_docker_logs`, `get_tpu_system_logs`,

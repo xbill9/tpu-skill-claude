@@ -23,7 +23,7 @@ Key entrypoints in the codebase:
 - **Root Makefile:** [Makefile](Makefile) — `skill` / `skill-install` / `skill-package` / `init` targets
 - **Snapshot refresher:** [refresh_skill.py](refresh_skill.py) — regenerates the bundled skill copies from the root sources
 - **Plugin marketplace manifests:** [.claude-plugin/](.claude-plugin/) — makes the repo installable via the Claude Code plugin system
-- **Reference guide:** `.claude/skills/tpu-management/references/tpu-builders-guide.md` — TPU Builders Program: zones, quotas, troubleshooting
+- **Reference guide:** `.claude/skills/tpu-management/references/tpu-guide.md` — TPU getting started guide: zones, quotas, troubleshooting
 
 ---
 

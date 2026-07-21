@@ -65,7 +65,7 @@ mkdir -p ~/.claude/skills && unzip -o /tmp/tpu-management-skill.zip -d ~/.claude
 ~/.claude/skills/tpu-management/mcp/project-setup.sh --global   # optional: register the MCP server
 ```
 
-All of these first run `make skill` (`refresh_skill.py`), which regenerates the bundled snapshots from the repo-root sources: `server.py`, `project-setup.sh`, and `requirements.txt` are copied into the skill's `mcp/` folder, and `references/tpu-builders-guide.md` is rebuilt from `tpu.md` with the embedded screenshots stripped. `SKILL.md` and `mcp/startup_script_template.sh` are hand-maintained and never overwritten.
+All of these first run `make skill` (`refresh_skill.py`), which regenerates the bundled snapshots from the repo-root sources: `server.py`, `project-setup.sh`, and `requirements.txt` are copied into the skill's `mcp/` folder, and `references/tpu-guide.md` is rebuilt from `tpu.md` with the embedded screenshots stripped. `SKILL.md` and `mcp/startup_script_template.sh` are hand-maintained and never overwritten.
 
 After installing (or updating), **restart Claude Code** or start a new session so it picks up the skill. Verify with `/skills` — `tpu-management` should be listed.
 
@@ -82,12 +82,12 @@ Because installs are refresh-and-copy (not symlinks), an installed copy goes sta
 | `refresh_skill.py` | Regenerates the bundled skill snapshots from the repo-root sources |
 | `requirements.txt` | Python dependencies for the MCP server |
 | `Makefile` | `skill` / `skill-install` / `skill-package` / `init` targets (see below) |
-| `.claude/skills/tpu-management/` | Project-level skill: `SKILL.md`, `mcp/` (server snapshot, installer, startup script template), `references/tpu-builders-guide.md` |
+| `.claude/skills/tpu-management/` | Project-level skill: `SKILL.md`, `mcp/` (server snapshot, installer, startup script template), `references/tpu-guide.md` |
 | `.claude-plugin/` | `plugin.json` + `marketplace.json` — the repo doubles as a Claude Code plugin marketplace |
 | `skills/tpu-management/` | Plugin-layout copy of the skill (synced by `make skill`) |
 | `dist/tpu-management-skill.zip` | Packaged skill for zip installs (built by `make skill-package`) |
 | `init.sh`, `set_env.sh`, `set_adc.sh` | GCP environment / credentials setup helpers |
-| `tpu.md` | TPU Builders Program guide source (gitignored; the stripped text copy ships in `references/`) |
+| `tpu.md` | TPU getting started guide source (gitignored; the stripped, vendor-neutral text copy ships in `references/tpu-guide.md`) |
 
 ---
 
@@ -133,7 +133,7 @@ When deploying to Google Cloud or Hugging Face, secure credentials using:
 
 - [SKILL.md](.claude/skills/tpu-management/SKILL.md) — the skill itself: lifecycle, tool catalog, required vLLM flags, field notes, cautions
 - [GEMINI.md](GEMINI.md) — Gemini CLI integration via a LiteLLM proxy pointed at the self-hosted Gemma 4 TPU endpoint
-- `references/tpu-builders-guide.md` — TPU Builders Program guide: flex-start zones, quotas, troubleshooting
+- `references/tpu-guide.md` — TPU getting started guide: flex-start zones, quotas, troubleshooting
 
 ## Credits
 

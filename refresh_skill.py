@@ -4,7 +4,7 @@
 Regenerates:
   .claude/skills/tpu-management/mcp/server.py              from  server.py
   .claude/skills/tpu-management/mcp/project-setup.sh       from  project-setup.sh
-  .claude/skills/tpu-management/references/tpu-builders-guide.md
+  .claude/skills/tpu-management/references/tpu-guide.md
                                                             from  tpu.md
                                                             (base64 screenshots stripped)
 
@@ -52,7 +52,7 @@ def main() -> int:
     print(f"copied project-setup.sh -> {(SKILL / 'mcp' / 'project-setup.sh').relative_to(ROOT)}")
     shutil.copyfile(ROOT / "requirements.txt", SKILL / "mcp" / "requirements.txt")
     print(f"copied requirements.txt -> {(SKILL / 'mcp' / 'requirements.txt').relative_to(ROOT)}")
-    build_guide(ROOT / "tpu.md", SKILL / "references" / "tpu-builders-guide.md")
+    build_guide(ROOT / "tpu.md", SKILL / "references" / "tpu-guide.md")
     return 0
 
 

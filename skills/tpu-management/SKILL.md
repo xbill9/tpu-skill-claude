@@ -13,7 +13,7 @@ verify health, benchmark, and tear down. Two ways to act:
    `gcloud` invocations, discovery, and retry/cleanup logic.
 2. **Fallback — direct `gcloud`.** If the MCP server is not connected, either offer to
    register the bundled server (see "Registering the MCP server") or run the equivalent
-   `gcloud` commands from `references/tpu-builders-guide.md`.
+   `gcloud` commands from `references/tpu-guide.md`.
 
 ## Bundled files
 
@@ -23,7 +23,7 @@ verify health, benchmark, and tear down. Two ways to act:
   registers the MCP server (see "Registering the MCP server").
 - `mcp/startup_script_template.sh` — the TPU VM startup script the agent injects when
   creating a queued resource (pulls `vllm/vllm-tpu:nightly` and serves the model).
-- `references/tpu-builders-guide.md` — the TPU Builders Program guide: prerequisites,
+- `references/tpu-guide.md` — the TPU getting started guide: prerequisites,
   flex-start capacity zones per TPU family, `gcloud` creation templates for v6e/v5p/v5e,
   persistent-disk + startup-script patterns, quota metrics and request procedure,
   troubleshooting/FAQ. Read it when working without the MCP tools, diagnosing
@@ -174,7 +174,7 @@ guide's command as written will fail; apply all of these:
   (see the reference guide).
 - Stuck in `WAITING_FOR_RESOURCES`/`PROVISIONING` or `STOCKOUT`: usually the
   `GPUS_ALL_REGIONS` global quota is 0 — see the Troubleshooting section of
-  `references/tpu-builders-guide.md` before retrying other zones.
+  `references/tpu-guide.md` before retrying other zones.
 - v5e uses the legacy queued-resources API and separate quota metrics; v6e/v5p use GCE
   machine types (`ct6e-standard-4t`, `ct5p-hightpu-4t`). Zone/family table is in the
   reference guide.

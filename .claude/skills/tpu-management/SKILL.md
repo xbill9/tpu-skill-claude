@@ -143,6 +143,22 @@ and `--limit-mm-per-prompt '{"image":4,"audio":1}'` for multimodal
 Image: `vllm/vllm-tpu:nightly`, run with `--privileged --net=host --shm-size 10gb`
 and `HF_HOME=/dev/shm`.
 
+Upstream references: [vLLM TPU docs](https://docs.vllm.ai/projects/tpu/en/latest/),
+[Recommended Models & Features](https://docs.vllm.ai/projects/tpu/en/latest/recommended_models_features/)
+(the support matrix — check it before serving quantized checkpoints),
+[vLLM Recipes](https://recipes.vllm.ai) (per-model deployment guides), and the
+[tpu-inference GitHub repo](https://github.com/vllm-project/tpu-inference)
+([releases](https://github.com/vllm-project/tpu-inference/releases) track newly
+landed quantization/model support).
+
+Known-broken (verified on `vllm-tpu:nightly`, Jul 2026): the Gemma 4 **E2B QAT**
+checkpoints do not load on TPU in any form — `-qat-w4a16-ct` fails with
+"compressed-tensors scheme for layer 'per_layer_model_projection' is not yet
+supported in the JAX path", and `-qat-q4_0-unquantized` fails on both the JAX and
+`MODEL_IMPL_TYPE=vllm` (torchax) paths with "weights not initialized from
+checkpoint: layers.15-34 self_attn.k_norm.weight" (the export omits k_norm for
+the upper KV-sharing layers). Serve the plain `google/gemma-4-E2B-it` instead.
+
 ## Field notes — GCE flex-start path (`gcloud compute instances create`)
 
 Verified on a live v6e-1 deployment (Jul 2026). When creating TPU VMs as GCE
@@ -170,6 +186,15 @@ guide's command as written will fail; apply all of these:
   `gcloud compute instances get-serial-port-output <name>`. Grep for the final
   "vLLM application startup complete." line — the earlier "Waiting for
   'Application startup complete.'" echo is a false-positive match.
+- **When direct SSH times out, tunnel through IAP:** even with a VPC rule
+  allowing tcp:22, an org policy or the client network may drop direct port-22
+  traffic (symptom: `gcloud compute ssh` hangs then "Connection timed out").
+  `gcloud compute ssh <name> --tunnel-through-iap` rides over HTTPS instead and
+  needs only the standard IAP firewall rule (source `35.235.240.0/20`) plus
+  `roles/iap.tunnelResourceAccessor`. Note the MCP agent's SSH-based tools
+  (`manage_vllm_docker`, `get_vllm_docker_logs`, `run_vllm_benchmark`,
+  `get_tpu_system_logs`) do not use IAP; on such networks run their documented
+  equivalents manually with `--tunnel-through-iap`.
 - **Quota is per region AND per TPU family:** creation fails immediately with
   `Quota 'TPUS_PER_TPU_FAMILY' exceeded. Limit: 0.0` in regions without CT6E
   quota (observed: us-east5 = 0, europe-west4 OK). This dimensioned quota is not

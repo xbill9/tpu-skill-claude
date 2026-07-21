@@ -1,6 +1,6 @@
 # TPU getting started guide
 
-> **Note:** This is a text-only copy of the repository's `tpu.md` (459 KB original). The
+> **Note:** This is a text-only copy of the repository's `tpu.md` (460 KB original). The
 > embedded base64 screenshots for the Cloud Console walkthrough have been stripped;
 > `![][imageN]` markers show where they appeared. See the original `tpu.md` at the repo
 > root for the images.
@@ -258,7 +258,7 @@ To help you get started as quickly as possible, we have compiled a list of recom
 | **JAX** | Writing high-performance ML code and custom architectures | • [Core JAX Documentation](https://docs.jax.dev/en/latest/) • [How to Think About TPUs](https://jax-ml.github.io/scaling-book/tpus/) • [Fine-tune a LLM using TPUs on GKE with JAX](https://docs.cloud.google.com/kubernetes-engine/docs/tutorials/train-llm-tpus-gke-jax)  |
 | **Tunix** | Scalable and highly efficient LLM post-training on TPUs | • [Tunix Documentation](https://tunix.readthedocs.io/en/latest/index.html) \* [Finetune FunctionGemma 270M for Mobile Actions using Tunix](https://github.com/google-gemini/gemma-cookbook/blob/main/FunctionGemma/%5BFunctionGemma%5DFinetune_FunctionGemma_270M_for_Mobile_Actions_with_Tunix.ipynb) See also this recent [Kaggle hackathon](https://www.kaggle.com/competitions/google-tunix-hackathon/overview) to teach a model to reason |
 | **Kinetic** | Simple quickstart for deploying code to TPUs | [https://github.com/keras-team/kinetic](https://github.com/keras-team/kinetic) [https://kinetic.readthedocs.io/en/latest/getting\_started.html](https://kinetic.readthedocs.io/en/latest/getting_started.html) |
-| **vLLM TPU** | High-throughput, memory-efficient serving of large language and multimodal models | • [vLLM TPU Project Documentation](https://docs.vllm.ai/projects/tpu/en/latest/) |
+| **vLLM TPU** | High-throughput, memory-efficient serving of large language and multimodal models | • [vLLM TPU Project Documentation](https://docs.vllm.ai/projects/tpu/en/latest/) • [Recommended Models & Features](https://docs.vllm.ai/projects/tpu/en/latest/recommended_models_features/) (support matrix incl. quantization formats) • [vLLM Recipes](https://recipes.vllm.ai) (per-model deployment guides) • [tpu-inference on GitHub](https://github.com/vllm-project/tpu-inference) ([releases/changelog](https://github.com/vllm-project/tpu-inference/releases)) |
 | **MaxText** | Training and fine tuning highly scalable, high-performance open-source LLMs written in pure JAX | [https://patricktoulme.substack.com/p/frontier-pretraining-infrastructure](https://patricktoulme.substack.com/p/frontier-pretraining-infrastructure) [Supervised fine tuning on a single host with MaxText](https://maxtext.readthedocs.io/en/latest/tutorials/posttraining/sft.html) |
 
 ## Get support
@@ -320,7 +320,9 @@ gcloud storage buckets add-iam-policy-binding gs://YOUR_BUCKET_NAME \
 ## Resources
 
 * JAX Resources \- [https://github.com/rcrowe-google/Learning-JAX](https://github.com/rcrowe-google/Learning-JAX)  
-* Introduction to TPU \- [https://jax-ml.github.io/scaling-book/](https://jax-ml.github.io/scaling-book/)
+* Introduction to TPU \- [https://jax-ml.github.io/scaling-book/](https://jax-ml.github.io/scaling-book/)  
+* vLLM Recipes (per-model deployment guides) \- [https://recipes.vllm.ai](https://recipes.vllm.ai)  
+* vLLM TPU backend on GitHub \- [https://github.com/vllm-project/tpu-inference](https://github.com/vllm-project/tpu-inference)
 
 # Creating a TPU via Console
 

@@ -8,13 +8,11 @@ pure logic, tool registration, template rendering, and repo hygiene.
 import asyncio
 import filecmp
 import subprocess
+import sys
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-
-import sys
-
 sys.path.insert(0, str(ROOT))
 import server  # noqa: E402
 

@@ -19,7 +19,7 @@ help:
 	@echo "Available commands:"
 	@echo "  make clean   - Run 'make clean' in all subdirectories"
 	@echo "  make test    - Run the repo unit tests (tests/) + 'make test' in subdirectories"
-	@echo "  make lint    - Run 'make lint' in all subdirectories"
+	@echo "  make lint    - ruff + bash -n on repo sources, then 'make lint' in subdirectories"
 	@echo "  make install - Run 'make install' in all subdirectories"
 	@echo "  make deploy  - Run 'make deploy' in all subdirectories"
 	@echo "  make skill         - Refresh tpu-management skill snapshots from server.py / tpu.md"
@@ -67,8 +67,14 @@ test: TARGET := test
 test: $(SUBDIRS)
 	python3 -m unittest discover -s tests -v
 
+# Lint the repo-root sources (snapshots in .claude/skills and skills/ are
+# generated copies — lint the sources, not the copies).
 lint: TARGET := lint
 lint: $(SUBDIRS)
+	@command -v ruff >/dev/null || { echo "ruff not found; install with: pip install ruff"; exit 1; }
+	ruff check server.py refresh_skill.py tests
+	@for s in project-setup.sh init.sh set_env.sh set_adc.sh; do bash -n $$s || exit 1; done
+	@echo "lint OK"
 
 install: TARGET := install
 install: $(SUBDIRS)

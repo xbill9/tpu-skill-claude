@@ -10,7 +10,7 @@ echo "-----------------------------------"
 echo "Project ID: {project_id}"
 echo "Zone: {zone}"
 echo "Model Name: {model_name}"
-echo "HF_SECRET_ID: hf-token"
+echo "HF_SECRET_ID: {hf_secret_id}"
 echo "-----------------------------------"
 
 # Ensure internet connectivity
@@ -61,6 +61,41 @@ for i in $(seq 1 5); do
 done
 set -e # Re-enable exit on error
 
+# Fetch the Hugging Face token from Secret Manager at boot. The token is never
+# baked into instance metadata (readable by anyone with compute.instances.get).
+# Retries for up to ~30 minutes so an IAM grant applied after creation still
+# lands; a fetch that 403s forever means the VM's service account is missing
+# roles/secretmanager.secretAccessor or the cloud-platform scope.
+echo "Fetching HF token from Secret Manager secret '{hf_secret_id}'..."
+# Tracing (set -x) stays off from here on: it would print the expanded token in
+# the HF_TOKEN assignment and the docker run command. The echo statements below
+# narrate progress instead.
+set +x
+HF_TOKEN=""
+set +e
+for i in $(seq 1 180); do
+  ACCESS_TOKEN=$(curl -sf -H "Metadata-Flavor: Google" \
+    "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])' 2>/dev/null)
+  if [ -n "$ACCESS_TOKEN" ]; then
+    HF_TOKEN=$(curl -sf -H "Authorization: Bearer $ACCESS_TOKEN" \
+      "https://secretmanager.googleapis.com/v1/projects/{project_id}/secrets/{hf_secret_id}/versions/latest:access" \
+      | python3 -c 'import json,sys,base64; print(base64.b64decode(json.load(sys.stdin)["payload"]["data"]).decode())' 2>/dev/null)
+  fi
+  if [ -n "$HF_TOKEN" ]; then
+    echo "HF token fetched from Secret Manager."
+    break
+  fi
+  echo "Attempt $i/180: could not fetch secret (missing IAM grant or scope?). Retrying in 10 seconds..."
+  sleep 10
+done
+set -e
+if [ -z "$HF_TOKEN" ]; then
+  echo "ERROR: could not fetch Secret Manager secret '{hf_secret_id}' after 30 minutes."
+  echo "Grant roles/secretmanager.secretAccessor to the VM's service account and reset the VM."
+  exit 1
+fi
+
 # Set vLLM environment variables
 echo "Setting vLLM environment variables..."
 VLLM_MODEL="{model_name}"
@@ -69,7 +104,6 @@ VLLM_TP_SIZE="{tp_size}"
 VLLM_MAX_BATCHED_TOKENS="4096"
 {limit_mm_per_prompt_env}
 HF_HOME="/dev/shm"
-HF_TOKEN="{hf_token}" # This will be sensitive, ensure it's quoted and not directly echoed for logs
 
 echo "VLLM_MODEL set to: $VLLM_MODEL"
 echo "VLLM_MAX_MODEL_LEN set to: $VLLM_MAX_MODEL_LEN"
@@ -86,11 +120,12 @@ echo "Attempting to start vLLM container..."
 sudo docker stop vllm-gemma4 > /dev/null 2>&1 || true
 sudo docker rm vllm-gemma4 > /dev/null 2>&1 || true
 
-# Log the full docker run command before executing it
+# Log the full docker run command before executing it (token masked — this goes
+# to the serial console, which is readable by anyone with instance access)
 echo "Executing command: sudo docker run --name vllm-gemma4 --privileged --net=host -d \\
   -v /dev/shm:/dev/shm --shm-size 10gb \\
   -e HF_HOME=\"$HF_HOME\" \\
-  -e HF_TOKEN=\"$HF_TOKEN\" \\
+  -e HF_TOKEN=\"***masked***\" \\
   vllm/vllm-tpu:nightly vllm serve \"$VLLM_MODEL\" \\
   --max-model-len \"$VLLM_MAX_MODEL_LEN\" \\
   --tensor-parallel-size \"$VLLM_TP_SIZE\" \\

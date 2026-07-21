@@ -8,7 +8,7 @@ description: Manage Google Cloud TPU capacity and Gemma 4 vLLM serving on TPU VM
 Operate Google Cloud TPU serving infrastructure for Gemma 4: acquire capacity, run vLLM,
 verify health, benchmark, and tear down. Two ways to act:
 
-1. **Preferred — MCP agent tools.** If the `tpu-31B-v6e8-devops-agent` MCP server is
+1. **Preferred — MCP agent tools.** If the `tpu-devops-agent` MCP server is
    connected in this session, use its tools (catalog below). They wrap the correct
    `gcloud` invocations, discovery, and retry/cleanup logic.
 2. **Fallback — direct `gcloud`.** If the MCP server is not connected, either offer to
@@ -59,8 +59,9 @@ claude mcp add tpu-devops \
 
 Requires: `pip install -r mcp/requirements.txt`, an authenticated
 `gcloud` CLI with alpha components (`gcloud components install alpha`), and the TPU API
-enabled. The server reads config from env vars: `GOOGLE_CLOUD_PROJECT`, `MODEL_NAME`,
-`ACCELERATOR_TYPE`, `TENSOR_PARALLEL_SIZE` (zone defaults to `europe-west4-a` in code).
+enabled. The server reads config from env vars: `GOOGLE_CLOUD_PROJECT` (falls back to
+the active gcloud config), `GOOGLE_CLOUD_ZONE` (default `europe-west4-a`),
+`GOOGLE_CLOUD_REGION`, `MODEL_NAME`, `ACCELERATOR_TYPE`, `TENSOR_PARALLEL_SIZE`.
 A Hugging Face token must exist as Secret Manager secret `hf-token` (save one with the
 `save_hf_token` tool) before any resource creation.
 
@@ -71,12 +72,15 @@ A Hugging Face token must exist as Secret Manager secret `hf-token` (save one wi
 2. **Acquire capacity.**
    - Preferred (v6e/v5p): `create_tpu_vm_instance` — GCE flex-start VM with vLLM
      auto-start; watch boot with `get_tpu_vm_serial_log`.
-   - Known zone, legacy API: `create_tpu_queued_resource` / `manage_queued_resource`
-     (flex-start by default: 4h max-run; `reserved=True` for reservations).
+   - Known zone, legacy API: `create_tpu_queued_resource` (non-destructive; skips if
+     the resource already exists) or `manage_queued_resource` (destructive — deletes
+     every other queued resource in the zone). Flex-start by default: 4h max-run;
+     `reserved=True` for reservations.
    - Unknown zone: `get_zones_with_available_quota`, or `find_tpu` which sweeps every
      zone with quota, polls until ACTIVE (3 min, extended to 10 min once PROVISIONING),
-     and cleans up failures. It skips zones marked failed in `tpu_zones_status.md`.
-3. **Wait for ACTIVE.** `check_tpu_availability` or `describe_queued_resource`.
+     and cleans up failures. It skips zones previously marked failed in
+     `~/.cache/tpu-devops/tpu_zones_status.md`.
+3. **Wait for ACTIVE.** `describe_queued_resource`.
    Queued resources move QUEUED → PROVISIONING → ACTIVE; FAILED/SUSPENDED means
    delete and retry (the manage tool does this automatically).
 4. **Serve.** The creation startup script auto-starts vLLM. Otherwise
@@ -86,7 +90,7 @@ A Hugging Face token must exist as Secret Manager secret `hf-token` (save one wi
    65536 ctx, 0.90 util). Model load can take many minutes — check
    `get_vllm_docker_logs` for "Application startup complete."
 5. **Verify.** `verify_model_health`, `get_vllm_endpoint`, `get_model_details`,
-   `query_queued_gemma4[_with_stats]`.
+   `query_queued_gemma4` (`include_stats=True` for TTFT/throughput).
 6. **Benchmark (optional).** `run_vllm_benchmark` (runs `vllm bench serve` in a
    separate container on the VM).
 7. **Tear down.** `destroy_queued_resource`. Flex-start bills until deletion and
@@ -101,12 +105,12 @@ docker-installing startup script, cloud-platform scopes), `list_tpu_vm_instances
 `destroy_tpu_vm_instance`, `get_tpu_vm_serial_log`, `get_tpu_vm_endpoint`
 
 **Capacity & lifecycle (queued resources — legacy, v5e):** `find_tpu`,
-`create_tpu_queued_resource`,
-`manage_queued_resource`, `destroy_queued_resource`, `list_queued_resources`,
-`describe_queued_resource`, `get_reservation_status`, `check_tpu_availability`,
+`create_tpu_queued_resource` (non-destructive),
+`manage_queued_resource` (destructive cleanup), `destroy_queued_resource`,
+`list_queued_resources`, `describe_queued_resource`,
 `get_zones_with_available_quota`, `find_gpu`, `estimate_deployment_cost`
 
-**Serving:** `manage_vllm_docker`, `get_vllm_endpoint`, `get_deployed_endpoint`,
+**Serving:** `manage_vllm_docker`, `get_vllm_endpoint`,
 `get_vllm_deployment_config` (gcloud one-liner), `get_vllm_tpu_deployment_config`
 (GKE manifest), `save_hf_token`
 
@@ -114,8 +118,8 @@ docker-installing startup script, cloud-platform scopes), `list_tpu_vm_instances
 `get_model_details`, `get_metrics`, `get_vllm_docker_logs`, `get_tpu_system_logs`,
 `get_cloud_logging_logs`, `analyze_cloud_logging` (Gemma-4-powered log triage)
 
-**Inference & benchmarking:** `query_queued_gemma4`, `query_queued_gemma4_with_stats`,
-`run_vllm_benchmark`
+**Inference & benchmarking:** `query_queued_gemma4` (`include_stats=True` for
+latency/throughput), `run_vllm_benchmark`
 
 Every agent in this repo also exposes `get_help` for its live configuration.
 
@@ -148,9 +152,10 @@ guide's command as written will fail; apply all of these:
 - **Secrets at boot:** add `--scopes=cloud-platform` at creation and grant the
   default compute SA `roles/secretmanager.secretAccessor` on `hf-token`
   (`gcloud secrets add-iam-policy-binding hf-token --member=serviceAccount:<project-number>-compute@developer.gserviceaccount.com --role=roles/secretmanager.secretAccessor`).
-  Fetch the token in the startup script via the metadata server + Secret Manager
-  REST API with a retry loop (~30 min) so an IAM grant applied after creation
-  still lands. Symptom of a missing grant/scope: the fetch 403s forever.
+  The bundled startup template fetches the token at boot via the metadata server +
+  Secret Manager REST API with a retry loop (~30 min) so an IAM grant applied after
+  creation still lands — the token is never written into instance metadata. Custom
+  scripts should do the same. Symptom of a missing grant/scope: the fetch 403s forever.
 - **Watch boot via serial console, not SSH:** SSH is often blocked by firewall
   policy. The startup template mirrors its log to `/dev/console`; follow it with
   `gcloud compute instances get-serial-port-output <name>`. Grep for the final

@@ -122,6 +122,25 @@ main() {
         fi
     done
 
+    # --- Register the tpu-devops MCP server for this repo ---
+    # .mcp.json is generated (and gitignored) because it embeds the GCP project id;
+    # project-setup.sh owns the writing logic, so delegate to it. Only generate when
+    # the entry is missing — project-setup.sh rewrites it with default model settings,
+    # which would clobber a customized one (rerun it directly with flags to regenerate).
+    echo -e "\n--- Registering the tpu-devops MCP server (.mcp.json) ---"
+    if [ -f "$SCRIPT_DIR/.mcp.json" ] && grep -q '"tpu-devops"' "$SCRIPT_DIR/.mcp.json"; then
+        echo "tpu-devops already registered in .mcp.json; leaving it untouched."
+        echo "To regenerate: ./project-setup.sh . --project $PROJECT_ID [--model ... --accelerator ... --tp ...]"
+    elif [ -f "$SCRIPT_DIR/project-setup.sh" ]; then
+        if ! "$SCRIPT_DIR/project-setup.sh" "$SCRIPT_DIR" --project "$PROJECT_ID" --skip-deps; then
+            echo "Warning: MCP server registration failed." >&2
+            ERRORS=$((ERRORS + 1))
+        fi
+    else
+        echo "Warning: project-setup.sh not found next to init.sh; skipping MCP registration." >&2
+        ERRORS=$((ERRORS + 1))
+    fi
+
     echo
     if [ "$ERRORS" -eq 0 ]; then
         echo "--- Full setup complete ---"

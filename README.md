@@ -18,6 +18,8 @@ make init TARGET=/path/to/project ARGS='--project <id>' # same, refreshing skill
 
 It uses the system `python3` (warning with a `pip install -r requirements.txt` hint if server dependencies are missing — it never creates a venv), merges the server entry into the project's `.mcp.json` without touching other servers, and prints the remaining manual steps (restart Claude Code, gcloud auth, HF token). See `./project-setup.sh --help` for all options. The installer is also bundled inside the skill itself (`mcp/project-setup.sh`), so an unzipped `dist/tpu-management-skill.zip` is self-installing.
 
+This repo's **own** `.mcp.json` is gitignored (it embeds your GCP project id) and is generated automatically: `./init.sh` registers the server on first run (leaving an existing entry untouched), or regenerate it any time with `./project-setup.sh . --project <gcp-project-id> [--model ... --accelerator ... --tp ...]`.
+
 ---
 
 ## 📦 Installing the `tpu-management` Skill

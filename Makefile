@@ -18,7 +18,7 @@ help:
 	@echo "========================================================="
 	@echo "Available commands:"
 	@echo "  make clean   - Run 'make clean' in all subdirectories"
-	@echo "  make test    - Run 'make test' in all subdirectories"
+	@echo "  make test    - Run the repo unit tests (tests/) + 'make test' in subdirectories"
 	@echo "  make lint    - Run 'make lint' in all subdirectories"
 	@echo "  make install - Run 'make install' in all subdirectories"
 	@echo "  make deploy  - Run 'make deploy' in all subdirectories"
@@ -65,6 +65,7 @@ clean: $(SUBDIRS)
 
 test: TARGET := test
 test: $(SUBDIRS)
+	python3 -m unittest discover -s tests -v
 
 lint: TARGET := lint
 lint: $(SUBDIRS)
